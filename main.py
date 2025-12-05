@@ -3,24 +3,37 @@ from typing import Annotated
 from fastapi import Depends, FastAPI, HTTPException, Query
 from sqlmodel import Field, Session, SQLModel, create_engine, select
 
+# M O D E L S
 
 # table=True tells SQLMODEL that it is a table in the SQL Db
-class Fighter(SQLModel, table=True):
-    id: int | None = Field(default=None , primary_key=True)
+class FighterBase(SQLModel):
     name: str = Field(index=True)
     age: int | None = Field(default=None, index=True)
+
+
+class Fighter(FighterBase, table=True):
+    id: int | None = Field(default=None , primary_key=True)
     secret_nickname: str
 
 
-class Division(SQLModel, table=True):
-    id: int | None = Field(default=None, primary_key=True)
-    weight: int | None = Field(default=None, index=True)
+class FighterPublic(FighterBase):
+    id: int
 
 
-class Country(SQLModel, table=True):
-    id: int | None = Field(default=None, primary_key=True)
-    name: str = Field(index=True)
+# THIS MODEL WILL VALIDATE DATA FROM THE CLIENTS
+class FighterCreate(FighterBase):
+    secret_nickname: str
 
+
+# All fields are optional,  when you update a fighter you can just send the fields that you want to update
+class FighterUpdate(FighterBase):
+    name: str = None = None
+    age: int | None = None
+    secret_nickname: str
+
+
+
+# D B   C O N N E C T I O N
 
 # ENGINE: holds connection to the DB 
 sqlite_file_name = "database.db"
@@ -62,73 +75,31 @@ def on_startup():
 
 
 # CREATING FIGHTERS - Adding a new fighter to the Session instance, commit changes to the db
-@app.post("/fighters/")
-def create_fighter(fighter: Fighter, session: SessionDep) -> Fighter:
-    session.add(fighter)
+@app.post("/fighters/", response_model=FighterPublic)
+def create_fighter(fighter: FighterCreate, session: SessionDep):
+    db_fighter = Fighter.model_validate(fighter)
+    session.add(db_fighter)
     session.commit()
-    session.refresh(fighter)
-    return fighter
+    session.refresh(db_fighter)
+    return db_fighter
 
 
-# Read fighters from the database using select
-@app.get("/fighters")
-def read_fighter(session: SessionDep, offset: int = 0, limit: Annotated[int, Query(le=100)] = 100,) -> list[Fighter]:
+# Reading fighters
+@app.get("/fighters/", response_model=list[HeroPulic])
+def read_fighters(session: SessionDep, offset: int = 0, limit: Annotated[int, Query(le=100)] = 100):
     fighters = session.exec(select(Fighter).offset(offset).limit(limit)).all()
     return fighters
 
 
-@app.get("/fighters/{fighter_id}")
-def read_fighter(fighter_id: int, session: SessionDep) -> Fighter:
-    fighter = session.get(Fighter, fighter_id)
-    if not fighter:
+
+@app.patch("/fighers/{fighter_id}", response_model=FighterPublic)
+def update_fighter(fighter_id: int, fighter: FighterUpdate, session: SessionDep):
+    fighter_db = session.get(Hero, hero_id)
+    if not fighter_db:
         raise HTTPException(status_code=404, detail="Fighter not found")
-    return fighter
-
-
-
-# DIVSIONS' ENDOPOINTS
-@app.post("/divisions/")
-def create_division(division: Division, session: SessionDep) -> Division:
-    session.add(division)
+    fighter_data = fighter.model_dump(exclude_unset=True)
+    fighter_db.sqlmodel_update(fighter_data)
+    session.add(fighter_db)
     session.commit()
-    session.refresh(division)
-    return division
-
-
-@app.get("/divisions")
-def read_division(session: SessionDep, offset: int = 0, limit: Annotated[int, Query(le=100)] = 100,) -> list[Division]:
-    divisions = session.exec(select(Division).offset(offset).limit(limit)).all()
-    return divisions
-
-
-
-@app.post("/Countries")
-def create_country(country: Country, session: SessionDep) -> Country:
-    session.add(country)
-    session.commit()
-    session.refresh(country)
-    return country
-
-
-
-
-# Read individual fighter
-
-
-# @app.get("/fighters/{fighter_id}")
-# def read_fighter(fighter_id: int, session: SessionDep) -> Fighter:
-#     fighter = session.get(Fighter, fighter_id)
-#     if not fighter:
-#         raise HTTPException(status_code=404, detail="Fighter not found")
-#     return fighter
-
-
-
-@app.delete("/fighters/{fighter_id}")
-def delete_fighter(fighter_id: int, session: SessionDep):
-    fighter = session.get(Fighter, fighter_id)
-    if not fighter:
-        raise HTTPException(status_code=400, detail="Fighter not found")
-    session.delete(fighter)
-    session.commit()
-    return {"ok": True}
+    session.refresh(fighter_db)
+    return fighter_db
